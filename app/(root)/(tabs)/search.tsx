@@ -6,5 +6,5 @@ export default function search() {
     <View>
       <Text>search</Text>
     </View>
-  )
+  );
 }

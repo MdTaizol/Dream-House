@@ -6,5 +6,5 @@ export default function saved() {
     <View>
       <Text>saved</Text>
     </View>
-  )
+  );
 }
