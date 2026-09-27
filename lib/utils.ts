@@ -1,13 +1,19 @@
-export const formatPrice = (value:number): string => {
-    if(value>=10000000){
-        const cr = (value/10000000).toFixed(1).replace(/\.0$/,"");
-        return `৳$(cr)cr`;
-    }
+export const formatPrice = (value: number): string => {
+  if (value >= 10000000) {
+    const cr = (value / 10000000)
+      .toFixed(1)
+      .replace(/\.0$/, "");
 
-      if (value >= 100000) {
-    const l = (value / 100000).toFixed(1).replace(/\.0$/, "");
-    return `৳${l}L`;
+    return `৳${cr} Cr`;
   }
-  return `₹${value.toLocaleString()}`;
 
+  if (value >= 100000) {
+    const l = (value / 100000)
+      .toFixed(1)
+      .replace(/\.0$/, "");
+
+    return `৳${l} Lakh`;
+  }
+
+  return `৳${value.toLocaleString("en-IN")}`;
 };
