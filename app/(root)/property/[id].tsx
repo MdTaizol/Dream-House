@@ -1,14 +1,13 @@
-
+import PropertyMap from "@/components/PropertyMap";
 import { useSavedProperty } from "@/hooks/useSavedProperty";
 import { useSupabase } from "@/hooks/useSupabase";
 import { supabase } from "@/lib/supabase";
 import { formatPrice } from "@/lib/utils";
 import { useUserStore } from "@/store/userStore";
 import { Property } from "@/types";
-import { useAuth } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,138 +18,509 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  Pressable,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 
-const { width } = Dimensions.get("window");
+const { width, height } = Dimensions.get("window");
 
-const ADMIN_PHONE = "01306575021"; // replace with your WhatsApp number
+const ADMIN_PHONE = "01306575021";
+
+/* ============================================================
+   NORMALIZE IMAGES
+============================================================ */
+
+const normalizeImages = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0
+    );
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (item): item is string =>
+            typeof item === "string" && item.trim().length > 0
+        );
+      }
+    } catch {
+      // Treat as a single URL.
+    }
+
+    return [trimmed];
+  }
+
+  return [];
+};
+
+/* ============================================================
+   PROPERTY DETAIL SCREEN
+============================================================ */
 
 export default function PropertyDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { userId } = useAuth();
+  const { id } = useLocalSearchParams<{
+    id: string;
+  }>();
+
   const router = useRouter();
+
   const isAdmin = useUserStore((state) => state.isAdmin);
 
   const [property, setProperty] = useState<Property | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [expanded, setExpanded] = useState(false);
-  const [imageViewerVisible, setImageViewerVisible] = useState(false);
 
-  const { isSaved, saveLoading, toggleSave } = useSavedProperty(id ?? "");
+  const [loading, setLoading] = useState(true);
+
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const [fullscreenIndex, setFullscreenIndex] = useState(0);
+
+  const [expanded, setExpanded] = useState(false);
+
+  const [imageViewerVisible, setImageViewerVisible] =
+    useState(false);
+
+  const fullscreenListRef =
+    useRef<FlatList<string>>(null);
+
+  const {
+    isSaved,
+    saveLoading,
+    toggleSave,
+  } = useSavedProperty(id ?? "");
 
   const authSupabase = useSupabase();
 
+  /* ==========================================================
+     IMAGES
+  ========================================================== */
+
+  const images = property
+    ? normalizeImages(property.images)
+    : [];
+
+  /* ==========================================================
+     FETCH PROPERTY
+  ========================================================== */
+
   useEffect(() => {
-    fetchProperty();
+    if (id) {
+      fetchProperty();
+    }
   }, [id]);
 
   const fetchProperty = async () => {
-    const { data } = await supabase
-      .from("properties")
-      .select("*")
-      .eq("id", id)
-      .single();
+    try {
+      setLoading(true);
 
-    setProperty(data);
-    setLoading(false);
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error(
+          "Fetch property error:",
+          error
+        );
+
+        Alert.alert(
+          "Error",
+          "Could not load this property."
+        );
+
+        setProperty(null);
+        return;
+      }
+
+      setProperty(data as Property);
+
+      setActiveIndex(0);
+      setFullscreenIndex(0);
+    } catch (error) {
+      console.error(
+        "Fetch property exception:",
+        error
+      );
+
+      Alert.alert(
+        "Error",
+        "Something went wrong while loading the property."
+      );
+
+      setProperty(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDelete = () => {
-    Alert.alert("Delete Property", "Are you sure?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          await authSupabase
-            .from("properties")
-            .delete()
-            .eq("id", id);
+  /* ==========================================================
+     OPEN FULLSCREEN IMAGE
+  ========================================================== */
 
-          router.replace("/(root)/(tabs)");
-        },
-      },
-    ]);
+  const openFullscreen = (index: number) => {
+    setFullscreenIndex(index);
+    setActiveIndex(index);
+    setImageViewerVisible(true);
+
+    setTimeout(() => {
+      fullscreenListRef.current?.scrollToIndex({
+        index,
+        animated: false,
+      });
+    }, 100);
   };
 
-  const handleMarkSold = () => {
-    Alert.alert("Mark as Sold", "Are you sure?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Mark Sold",
-        onPress: async () => {
-          await authSupabase
-            .from("properties")
-            .update({ is_sold: true })
-            .eq("id", id);
+  /* ==========================================================
+     MAIN IMAGE SLIDER
+  ========================================================== */
 
-          setProperty((prev) =>
-            prev ? { ...prev, is_sold: true } : prev
-          );
-        },
-      },
-    ]);
-  };
-
-  const handleContact = () => {
-    const message = `Hi! I'm interested in the property: ${property?.title}`;
-
-    const url = `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(
-      message
-    )}`;
-
-    Linking.openURL(url);
-  };
-
-  const onScroll = (
-    e: NativeSyntheticEvent<NativeScrollEvent>
+  const onMainSliderScrollEnd = (
+    event: NativeSyntheticEvent<NativeScrollEvent>
   ) => {
+    if (images.length === 0) {
+      return;
+    }
+
     const index = Math.round(
-      e.nativeEvent.contentOffset.x / width
+      event.nativeEvent.contentOffset.x / width
     );
 
-    setActiveIndex(index);
+    const safeIndex = Math.max(
+      0,
+      Math.min(index, images.length - 1)
+    );
+
+    setActiveIndex(safeIndex);
   };
+
+  /* ==========================================================
+     FULLSCREEN SLIDER
+  ========================================================== */
+
+  const onFullscreenScrollEnd = (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => {
+    if (images.length === 0) {
+      return;
+    }
+
+    const index = Math.round(
+      event.nativeEvent.contentOffset.x / width
+    );
+
+    const safeIndex = Math.max(
+      0,
+      Math.min(index, images.length - 1)
+    );
+
+    setFullscreenIndex(safeIndex);
+    setActiveIndex(safeIndex);
+  };
+
+  /* ==========================================================
+     DELETE PROPERTY
+  ========================================================== */
+
+  const handleDelete = () => {
+    if (!id || !property) {
+      return;
+    }
+
+    Alert.alert(
+      "Delete Property",
+      `Are you sure you want to permanently delete "${property.title}"?`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+
+          onPress: async () => {
+            try {
+              setActionLoading(true);
+
+              const { error } = await authSupabase
+                .from("properties")
+                .delete()
+                .eq("id", id);
+
+              if (error) {
+                console.error(
+                  "Delete property error:",
+                  error
+                );
+
+                Alert.alert(
+                  "Delete Failed",
+                  error.message ||
+                    "Could not delete this property."
+                );
+
+                return;
+              }
+
+              Alert.alert(
+                "Success",
+                "Property deleted successfully.",
+                [
+                  {
+                    text: "OK",
+                    onPress: () => {
+                      router.replace(
+                        "/(root)/(tabs)" as any
+                      );
+                    },
+                  },
+                ]
+              );
+            } catch (error) {
+              console.error(
+                "Delete property exception:",
+                error
+              );
+
+              Alert.alert(
+                "Error",
+                "Something went wrong while deleting the property."
+              );
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  /* ==========================================================
+     MARK SOLD / MAKE AVAILABLE
+  ========================================================== */
+
+  const handleToggleSold = () => {
+    if (!id || !property) {
+      return;
+    }
+
+    const nextSoldState = !property.is_sold;
+
+    const alertTitle = nextSoldState
+      ? "Mark as Sold"
+      : "Mark as Available";
+
+    const alertMessage = nextSoldState
+      ? `Are you sure you want to mark "${property.title}" as sold?`
+      : `Do you want to make "${property.title}" available again?`;
+
+    Alert.alert(
+      alertTitle,
+      alertMessage,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: nextSoldState
+            ? "Mark Sold"
+            : "Make Available",
+
+          onPress: async () => {
+            try {
+              setActionLoading(true);
+
+              const { data, error } = await authSupabase
+                .from("properties")
+                .update({
+                  is_sold: nextSoldState,
+                })
+                .eq("id", id)
+                .select()
+                .single();
+
+              if (error) {
+                console.error(
+                  "Update sold state error:",
+                  error
+                );
+
+                Alert.alert(
+                  "Update Failed",
+                  error.message ||
+                    "Could not update property status."
+                );
+
+                return;
+              }
+
+              setProperty(data as Property);
+
+              Alert.alert(
+                "Success",
+                nextSoldState
+                  ? "Property has been marked as sold."
+                  : "Property is available again."
+              );
+            } catch (error) {
+              console.error(
+                "Update sold state exception:",
+                error
+              );
+
+              Alert.alert(
+                "Error",
+                "Something went wrong while updating the property."
+              );
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  /* ==========================================================
+     CONTACT AGENT
+  ========================================================== */
+
+  const handleContact = async () => {
+    if (!property) {
+      return;
+    }
+
+    const message =
+      `Hi! I'm interested in the property: ${property.title}`;
+
+    const whatsappUrl =
+      `https://wa.me/${ADMIN_PHONE}` +
+      `?text=${encodeURIComponent(message)}`;
+
+    try {
+      await Linking.openURL(whatsappUrl);
+    } catch (error) {
+      console.error(
+        "WhatsApp error:",
+        error
+      );
+
+      Alert.alert(
+        "WhatsApp Error",
+        "Could not open WhatsApp."
+      );
+    }
+  };
+
+  /* ==========================================================
+     LOADING
+  ========================================================== */
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center bg-white">
-        <ActivityIndicator size="large" color="#2563EB" />
-      </View>
+      <SafeAreaView className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" />
+
+          <Text className="mt-3 text-gray-500">
+            Loading property...
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
+
+  /* ==========================================================
+     PROPERTY NOT FOUND
+  ========================================================== */
 
   if (!property) {
     return (
-      <View className="flex-1 items-center justify-center bg-white">
-        <Text className="text-gray-500">
-          Property not found
-        </Text>
-      </View>
+      <SafeAreaView className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center px-6">
+          <Ionicons
+            name="home-outline"
+            size={64}
+            color="#9CA3AF"
+          />
+
+          <Text className="mt-4 text-xl font-bold text-gray-800">
+            Property Not Found
+          </Text>
+
+          <Text className="mt-2 text-center text-gray-500">
+            This property may have been deleted
+            or is no longer available.
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="mt-6 rounded-xl bg-black px-6 py-3"
+          >
+            <Text className="font-semibold text-white">
+              Go Back
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${
-    property.longtitude - 0.003
-  }%2C${property.latitude - 0.003}%2C${
-    property.longtitude + 0.003
-  }%2C${property.latitude + 0.003}&layer=mapnik&marker=${
-    property.latitude
-  }%2C${property.longtitude}`;
+  /* ==========================================================
+     MAP COORDINATES
+  ========================================================== */
+
+  const latitude = Number(
+    String(property.latitude ?? "").trim()
+  );
+
+  // IMPORTANT:
+  // Database column is "longitude"
+  const longitude = Number(
+    String(property.longitude ?? "").trim()
+  );
+
+  const hasCoordinates =
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude !== 0 &&
+    longitude !== 0;
+
+  const mapUrl = hasCoordinates
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=` +
+      `${longitude - 0.005}%2C` +
+      `${latitude - 0.005}%2C` +
+      `${longitude + 0.005}%2C` +
+      `${latitude + 0.005}` +
+      `&layer=mapnik` +
+      `&marker=${latitude}%2C${longitude}`
+    : "";
+
+  const mapLink = hasCoordinates
+    ? `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`
+    : "";
+
+  /* ==========================================================
+     DESCRIPTION
+  ========================================================== */
 
   const isLongDesc =
     (property.description?.length ?? 0) > 150;
@@ -160,442 +530,592 @@ export default function PropertyDetailScreen() {
       ? property.description
       : property.description?.slice(0, 150) + "...";
 
+  /* ==========================================================
+     UI
+  ========================================================== */
+
   return (
     <View className="flex-1 bg-white">
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* ================= IMAGE CAROUSEL ================= */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingBottom: 30,
+        }}
+      >
+        {/* ====================================================
+            IMAGE SLIDER
+        ==================================================== */}
 
-        <View>
+        <View className="relative">
           <View
             style={{
               opacity: property.is_sold ? 0.5 : 1,
             }}
           >
-            <FlatList
-              data={property.images}
-              keyExtractor={(_, i) => i.toString()}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() =>
-                    setImageViewerVisible(true)
-                  }
-                  activeOpacity={0.9}
-                >
-                  <Image
-                    source={{ uri: item }}
-                    style={{
-                      width,
-                      height: 300,
-                    }}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
-              )}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onScroll={onScroll}
-              scrollEventThrottle={16}
-            />
-          </View>
-
-          {/* Image Count */}
-
-          <View className="absolute bottom-3 right-4 bg-black/50 px-3 py-1 rounded-full">
-            <Text className="text-white text-xs font-medium">
-              {activeIndex + 1}/{property.images.length}
-            </Text>
-          </View>
-
-          {/* Dot Indicators */}
-
-          {property.images.length > 1 && (
-            <View className="absolute bottom-3 left-0 right-0 flex-row justify-center gap-1">
-              {property.images.map((_, i) => (
-                <View
-                  key={i}
-                  className={`h-1.5 rounded-full ${
-                    i === activeIndex
-                      ? "w-4 bg-white"
-                      : "w-1.5 bg-white/50"
-                  }`}
+            {images.length > 0 ? (
+              <FlatList
+                data={images}
+                horizontal
+                pagingEnabled
+                bounces={false}
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(item, index) =>
+                  `property-image-${index}-${item}`
+                }
+                renderItem={({ item, index }) => (
+                  <TouchableOpacity
+                    activeOpacity={0.95}
+                    onPress={() =>
+                      openFullscreen(index)
+                    }
+                  >
+                    <Image
+                      source={{
+                        uri: item,
+                      }}
+                      style={{
+                        width,
+                        height: 300,
+                      }}
+                      resizeMode="cover"
+                      onError={(event) => {
+                        console.log(
+                          "Image loading error:",
+                          item,
+                          event.nativeEvent
+                        );
+                      }}
+                    />
+                  </TouchableOpacity>
+                )}
+                onMomentumScrollEnd={
+                  onMainSliderScrollEnd
+                }
+                initialNumToRender={1}
+                windowSize={3}
+              />
+            ) : (
+              <View
+                className="items-center justify-center bg-gray-100"
+                style={{
+                  width,
+                  height: 300,
+                }}
+              >
+                <Ionicons
+                  name="image-outline"
+                  size={60}
+                  color="#9CA3AF"
                 />
-              ))}
-            </View>
-          )}
 
-          {/* Back + Save */}
+                <Text className="mt-3 text-gray-500">
+                  No images available
+                </Text>
+              </View>
+            )}
+          </View>
 
-          <SafeAreaView className="absolute top-0 left-0 right-0">
-            <View className="flex-row items-center justify-between px-4 pt-2">
+          {/* TOP BUTTONS */}
+
+          <SafeAreaView
+            className="absolute left-0 right-0 top-0"
+            edges={["top"]}
+          >
+            <View className="flex-row items-center justify-between px-4">
               <TouchableOpacity
                 onPress={() => router.back()}
-                className="w-10 h-10 bg-white rounded-full items-center justify-center"
-                style={{ elevation: 3 }}
+                className="h-11 w-11 items-center justify-center rounded-full bg-black/50"
               >
                 <Ionicons
                   name="arrow-back"
-                  size={20}
-                  color="#111827"
+                  size={24}
+                  color="white"
                 />
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={toggleSave}
                 disabled={saveLoading}
-                className="w-10 h-10 bg-white rounded-full items-center justify-center"
-                style={{ elevation: 3 }}
+                className="h-11 w-11 items-center justify-center rounded-full bg-black/50"
               >
-                <Ionicons
-                  name={
-                    isSaved
-                      ? "heart"
-                      : "heart-outline"
-                  }
-                  size={20}
-                  color={
-                    isSaved
-                      ? "#EF4444"
-                      : "#111827"
-                  }
-                />
+                {saveLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="white"
+                  />
+                ) : (
+                  <Ionicons
+                    name={
+                      isSaved
+                        ? "heart"
+                        : "heart-outline"
+                    }
+                    size={24}
+                    color={
+                      isSaved
+                        ? "#EF4444"
+                        : "white"
+                    }
+                  />
+                )}
               </TouchableOpacity>
             </View>
           </SafeAreaView>
-        </View>
 
-        {/* ================= CONTENT ================= */}
+          {/* SOLD BADGE */}
 
-        <View
-          className="px-5 pt-5 pb-8"
-          style={{
-            opacity: property.is_sold ? 0.6 : 1,
-          }}
-        >
-          {/* Badges */}
-
-          <View className="flex-row gap-2 mb-3 flex-wrap">
-            <View className="bg-blue-50 px-3 py-1 rounded-full">
-              <Text className="text-blue-600 text-xs font-semibold capitalize">
-                {property.type}
+          {property.is_sold && (
+            <View className="absolute bottom-5 left-5 rounded-lg bg-red-600 px-4 py-2">
+              <Text className="font-bold text-white">
+                SOLD
               </Text>
             </View>
+          )}
 
-            {property.if_featured && (
-              <View className="bg-amber-50 px-3 py-1 rounded-full">
-                <Text className="text-amber-600 text-xs font-semibold">
-                  ⭐ Featured
-                </Text>
-              </View>
-            )}
+          {/* IMAGE COUNTER */}
 
-            {property.is_sold && (
-              <View className="bg-red-50 px-3 py-1 rounded-full">
-                <Text className="text-red-500 text-xs font-semibold">
-                  Sold
-                </Text>
-              </View>
-            )}
-          </View>
+          {images.length > 0 && (
+            <View className="absolute bottom-5 right-5 rounded-full bg-black/70 px-3 py-1.5">
+              <Text className="font-semibold text-white">
+                {activeIndex + 1} / {images.length}
+              </Text>
+            </View>
+          )}
 
-          {/* Title */}
+          {/* IMAGE DOTS */}
 
-          <Text className="text-2xl font-bold text-gray-900 mb-1">
+          {images.length > 1 && (
+            <View className="absolute bottom-2 left-0 right-0 flex-row items-center justify-center">
+              {images.map((_, index) => (
+                <View
+                  key={`dot-${index}`}
+                  className={`mx-1 h-2 rounded-full ${
+                    activeIndex === index
+                      ? "w-5 bg-white"
+                      : "w-2 bg-white/50"
+                  }`}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* ====================================================
+            PROPERTY CONTENT
+        ==================================================== */}
+
+        <View className="px-5 pt-5">
+          {/* TYPE */}
+
+          {property.type && (
+            <Text className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              {property.type}
+            </Text>
+          )}
+
+          {/* TITLE */}
+
+          <Text className="text-2xl font-bold text-gray-900">
             {property.title}
           </Text>
 
-          {/* Price */}
+          {/* PRICE */}
 
-          <Text className="text-blue-600 text-xl font-bold mb-4">
+          <Text className="mt-2 text-2xl font-bold text-green-600">
             {formatPrice(property.price)}
           </Text>
 
-          {/* Specs */}
+          {/* LOCATION */}
 
-          <View className="flex-row justify-between bg-gray-50 rounded-2xl p-4 mb-5">
+          <View className="mt-3 flex-row items-start">
+            <Ionicons
+              name="location-outline"
+              size={20}
+              color="#6B7280"
+            />
+
+            <View className="ml-2 flex-1">
+              <Text className="text-base text-gray-600">
+                {property.address}
+              </Text>
+
+              {property.city && (
+                <Text className="mt-1 text-sm text-gray-500">
+                  {property.city}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* PROPERTY SPECS */}
+
+          <View className="mt-6 flex-row flex-wrap">
             <SpecItem
               icon="bed-outline"
-              label="Beds"
+              label="Bedrooms"
               value={`${property.bedrooms}`}
             />
 
             <SpecItem
               icon="water-outline"
-              label="Baths"
+              label="Bathrooms"
               value={`${property.bathrooms}`}
             />
 
             <SpecItem
-              icon="expand-outline"
+              icon="resize-outline"
               label="Area"
-              value={`${property.area_sqft} ft²`}
-            />
-
-            <SpecItem
-              icon="home-outline"
-              label="Type"
-              value={property.type}
+              value={`${property.area_sqft} sqft`}
             />
           </View>
 
-          {/* Description */}
+          {/* DESCRIPTION */}
 
-          <Text className="text-base font-bold text-gray-900 mb-2">
-            Description
-          </Text>
+          <View className="mt-7">
+            <Text className="text-xl font-bold text-gray-900">
+              Description
+            </Text>
 
-          <Text className="text-gray-500 text-sm leading-6 mb-1">
-            {displayDesc}
-          </Text>
+            <Text className="mt-3 leading-6 text-gray-600">
+              {displayDesc ||
+                "No description available."}
+            </Text>
 
-          {isLongDesc && (
+            {isLongDesc && (
+              <TouchableOpacity
+                onPress={() =>
+                  setExpanded(!expanded)
+                }
+                className="mt-2"
+              >
+                <Text className="font-semibold text-green-600">
+                  {expanded
+                    ? "Show Less"
+                    : "Read More"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* ==================================================
+              LOCATION / MAP
+          ================================================== */}
+
+          <View className="mt-7">
+            <Text className="mb-3 text-xl font-bold text-gray-900">
+              Location
+            </Text>
+
+            {hasCoordinates ? (
+              <PropertyMap
+                mapUrl={mapUrl}
+                mapLink={mapLink}
+              />
+            ) : (
+              <View
+                className="items-center justify-center rounded-2xl bg-gray-100"
+                style={{
+                  height: 180,
+                }}
+              >
+                <Ionicons
+                  name="map-outline"
+                  size={45}
+                  color="#9CA3AF"
+                />
+
+                <Text className="mt-3 text-center text-gray-500">
+                  Map location is not available.
+                </Text>
+
+                <Text className="mt-2 text-xs text-gray-400">
+                  Latitude: {String(property.latitude)}
+                </Text>
+
+                <Text className="text-xs text-gray-400">
+                  Longitude: {String(property.longitude)}
+                </Text>
+              </View>
+            )}
+
+            {/* ADDRESS */}
+
+            {property.address && (
+              <View className="mt-3 flex-row items-start">
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color="#6B7280"
+                />
+
+                <Text className="ml-2 flex-1 leading-6 text-gray-600">
+                  {property.address}
+                  {property.city
+                    ? `, ${property.city}`
+                    : ""}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* CONTACT AGENT */}
+
+          {!property.is_sold && (
             <TouchableOpacity
-              onPress={() =>
-                setExpanded(!expanded)
-              }
+              onPress={handleContact}
+              className="mt-7 flex-row items-center justify-center rounded-2xl bg-green-600 py-4"
             >
-              <Text className="text-blue-600 text-sm font-medium mb-5">
-                {expanded
-                  ? "Show less"
-                  : "Read more"}
+              <Ionicons
+                name="logo-whatsapp"
+                size={23}
+                color="white"
+              />
+
+              <Text className="ml-2 text-base font-bold text-white">
+                Contact Agent
               </Text>
             </TouchableOpacity>
           )}
 
-          <View className="mb-5" />
-
-          {/* Location */}
-
-          <Text className="text-base font-bold text-gray-900 mb-2">
-            Location
-          </Text>
-
-          <View className="flex-row items-center gap-2 mb-4">
-            <Ionicons
-              name="location-outline"
-              size={16}
-              color="#6B7280"
-            />
-
-            <Text className="text-gray-500 text-sm flex-1">
-              {property.address}, {property.city}
-            </Text>
-          </View>
-
-          {/* Map */}
-
-          <TouchableOpacity
-            onPress={() =>
-              router.push({
-                pathname:
-                  "/(root)/property/map",
-                params: {
-                  latitude:
-                    property.latitude,
-                  longitude:
-                    property.longtitude,
-                  title: property.title,
-                  address: `${property.address}, ${property.city}`,
-                },
-              })
-            }
-            activeOpacity={0.9}
-            className="rounded-2xl overflow-hidden mb-6"
-            style={{ height: 200 }}
-          >
-            <WebView
-              source={{ uri: mapUrl }}
-              style={{ flex: 1 }}
-              scrollEnabled={false}
-              pointerEvents="none"
-            />
-
-            <View className="absolute bottom-3 right-3 bg-white/90 px-3 py-1 rounded-full flex-row items-center gap-1">
-              <Ionicons
-                name="expand-outline"
-                size={12}
-                color="#374151"
-              />
-
-              <Text className="text-gray-600 text-xs font-medium">
-                Tap to expand
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* Contact */}
-
-          <TouchableOpacity
-            onPress={handleContact}
-            className="flex-row items-center justify-center gap-2 bg-blue-600 py-4 rounded-2xl mb-4"
-          >
-            <Ionicons
-              name="logo-whatsapp"
-              size={20}
-              color="white"
-            />
-
-            <Text className="text-white font-bold text-base">
-              Contact Agent
-            </Text>
-          </TouchableOpacity>
-
-          {/* Admin Actions */}
+          {/* ADMIN ACTIONS */}
 
           {isAdmin && (
-            <View className="flex-row gap-3">
-              {!property.is_sold && (
-                <TouchableOpacity
-                  onPress={handleMarkSold}
-                  className="flex-1 flex-row items-center justify-center gap-2 bg-amber-50 py-4 rounded-2xl border border-amber-200"
-                >
-                  <Ionicons
-                    name="checkmark-circle-outline"
-                    size={18}
-                    color="#D97706"
-                  />
+            <View className="mt-8 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+              <View className="mb-4 flex-row items-center">
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={22}
+                  color="#111827"
+                />
 
-                  <Text className="text-amber-600 font-semibold">
-                    Mark Sold
-                  </Text>
-                </TouchableOpacity>
-              )}
+                <Text className="ml-2 text-lg font-bold text-gray-900">
+                  Admin Actions
+                </Text>
+              </View>
+
+              {/* MARK SOLD / AVAILABLE */}
+
+              <TouchableOpacity
+                onPress={handleToggleSold}
+                disabled={actionLoading}
+                className={`mb-3 flex-row items-center justify-center rounded-xl py-4 ${
+                  property.is_sold
+                    ? "bg-blue-600"
+                    : "bg-orange-500"
+                }`}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name={
+                        property.is_sold
+                          ? "checkmark-circle-outline"
+                          : "pricetag-outline"
+                      }
+                      size={22}
+                      color="white"
+                    />
+
+                    <Text className="ml-2 font-bold text-white">
+                      {property.is_sold
+                        ? "Mark as Available"
+                        : "Mark as Sold"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* DELETE */}
 
               <TouchableOpacity
                 onPress={handleDelete}
-                className="flex-1 flex-row items-center justify-center gap-2 bg-red-50 py-4 rounded-2xl border border-red-100"
+                disabled={actionLoading}
+                className="flex-row items-center justify-center rounded-xl bg-red-600 py-4"
               >
                 <Ionicons
                   name="trash-outline"
-                  size={18}
-                  color="#EF4444"
+                  size={22}
+                  color="white"
                 />
 
-                <Text className="text-red-500 font-semibold">
-                  Delete
+                <Text className="ml-2 font-bold text-white">
+                  Delete Property
                 </Text>
               </TouchableOpacity>
+
+              <Text className="mt-3 text-center text-xs leading-5 text-gray-500">
+                Mark as Sold changes only the
+                property status. Delete Property
+                permanently removes the property.
+              </Text>
             </View>
           )}
         </View>
       </ScrollView>
 
-      {/* ================= FULLSCREEN IMAGE VIEWER ================= */}
+      {/* ======================================================
+          FULLSCREEN IMAGE VIEWER
+      ====================================================== */}
 
       <Modal
         visible={imageViewerVisible}
-        transparent
         animationType="fade"
+        presentationStyle="fullScreen"
         onRequestClose={() =>
           setImageViewerVisible(false)
         }
       >
         <View className="flex-1 bg-black">
-          {/* Close Button */}
+          {/* TOP BAR */}
 
-          <SafeAreaView className="absolute top-0 left-0 right-0 z-10">
-            <View className="flex-row justify-end px-4 pt-2">
-              <Pressable
+          <SafeAreaView
+            className="absolute left-0 right-0 top-0 z-10"
+            edges={["top"]}
+          >
+            <View className="flex-row items-center justify-between px-4">
+              <TouchableOpacity
                 onPress={() =>
                   setImageViewerVisible(false)
                 }
-                className="w-10 h-10 rounded-full bg-white/20 items-center justify-center"
+                className="h-11 w-11 items-center justify-center rounded-full bg-white/20"
               >
                 <Ionicons
                   name="close"
-                  size={26}
+                  size={28}
                   color="white"
                 />
-              </Pressable>
+              </TouchableOpacity>
+
+              <View className="rounded-full bg-white/20 px-4 py-2">
+                <Text className="font-semibold text-white">
+                  {fullscreenIndex + 1} /{" "}
+                  {images.length}
+                </Text>
+              </View>
             </View>
           </SafeAreaView>
 
-          {/* Fullscreen Image Carousel */}
+          {/* FULLSCREEN SLIDER */}
 
-          <FlatList
-            data={property.images}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            initialScrollIndex={activeIndex}
-            keyExtractor={(_, index) =>
-              `fullscreen-${index}`
-            }
-            getItemLayout={(_, index) => ({
-              length: width,
-              offset: width * index,
-              index,
-            })}
-            renderItem={({ item }) => (
-              <View
-                style={{
-                  width,
-                  flex: 1,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Image
-                  source={{ uri: item }}
+          {images.length > 0 && (
+            <FlatList
+              ref={fullscreenListRef}
+              data={images}
+              horizontal
+              pagingEnabled
+              bounces={false}
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item, index) =>
+                `fullscreen-${index}-${item}`
+              }
+              renderItem={({ item }) => (
+                <View
                   style={{
-                    width: "100%",
-                    height: "80%",
+                    width,
+                    height,
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
-                  resizeMode="contain"
-                />
+                >
+                  <Image
+                    source={{
+                      uri: item,
+                    }}
+                    style={{
+                      width,
+                      height: height * 0.8,
+                    }}
+                    resizeMode="contain"
+                  />
+                </View>
+              )}
+              getItemLayout={(_data, index) => ({
+                length: width,
+                offset: width * index,
+                index,
+              })}
+              onMomentumScrollEnd={
+                onFullscreenScrollEnd
+              }
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  fullscreenListRef.current?.scrollToIndex(
+                    {
+                      index: Math.min(
+                        info.index,
+                        images.length - 1
+                      ),
+                      animated: false,
+                    }
+                  );
+                }, 100);
+              }}
+              initialNumToRender={1}
+              windowSize={3}
+            />
+          )}
+
+          {/* FULLSCREEN DOTS */}
+
+          {images.length > 1 && (
+            <SafeAreaView
+              className="absolute bottom-0 left-0 right-0"
+              edges={["bottom"]}
+            >
+              <View className="mb-4 flex-row items-center justify-center">
+                {images.map((_, index) => (
+                  <View
+                    key={`fullscreen-dot-${index}`}
+                    className={`mx-1 h-2 rounded-full ${
+                      fullscreenIndex === index
+                        ? "w-6 bg-white"
+                        : "w-2 bg-white/40"
+                    }`}
+                  />
+                ))}
               </View>
-            )}
-            onMomentumScrollEnd={(e) => {
-              const index = Math.round(
-                e.nativeEvent.contentOffset.x /
-                  width
-              );
-
-              setActiveIndex(index);
-            }}
-          />
-
-          {/* Image Counter */}
-
-          <View className="absolute bottom-10 left-0 right-0 items-center">
-            <View className="bg-white/20 px-4 py-2 rounded-full">
-              <Text className="text-white font-medium">
-                {activeIndex + 1} /{" "}
-                {property.images.length}
-              </Text>
-            </View>
-          </View>
+            </SafeAreaView>
+          )}
         </View>
       </Modal>
     </View>
   );
 }
 
+/* ============================================================
+   SPEC ITEM
+============================================================ */
+
+type SpecItemProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+};
+
 function SpecItem({
   icon,
   label,
   value,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-}) {
+}: SpecItemProps) {
   return (
-    <View className="items-center gap-1">
-      <Ionicons
-        name={icon}
-        size={20}
-        color="#2563EB"
-      />
+    <View className="mb-3 mr-3 min-w-[45%] flex-1 rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <View className="flex-row items-center">
+        <Ionicons
+          name={icon}
+          size={22}
+          color="#4B5563"
+        />
 
-      <Text className="text-gray-900 font-bold text-sm">
+        <Text className="ml-2 text-sm text-gray-500">
+          {label}
+        </Text>
+      </View>
+
+      <Text className="mt-2 text-base font-bold text-gray-900">
         {value}
-      </Text>
-
-      <Text className="text-gray-400 text-xs">
-        {label}
       </Text>
     </View>
   );
 }
-

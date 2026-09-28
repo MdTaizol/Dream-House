@@ -25,7 +25,6 @@ export default function Profile() {
   // ================================
   // UPDATE PROFILE IMAGE
   // ================================
-
   const handleUpdateProfileImage = async () => {
     try {
       const permissionResult =
@@ -65,7 +64,6 @@ export default function Profile() {
       setIsUpdating(true);
 
       const base64Image = asset.base64;
-
       const uri = asset.uri;
 
       const filename =
@@ -114,7 +112,6 @@ export default function Profile() {
   // ================================
   // SIGN OUT
   // ================================
-
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -136,42 +133,72 @@ export default function Profile() {
   // ================================
   // HELP & SUPPORT
   // ================================
-
   const handleHelpSupport = () => {
     Alert.alert(
       "Help & Support",
-      "Need help with the DreamHouse app?",
+      "How would you like to contact DreamHouse Support?",
       [
         {
           text: "Cancel",
           style: "cancel",
         },
         {
-          text: "Send Email",
+          text: "Email",
           onPress: async () => {
-            const email =
-              "taizolislam41@gmail.com";
+            try {
+              const email =
+                "taizolislam41@gmail.com";
 
-            const subject =
-              "DreamHouse - Help & Support";
+              const subject =
+                "DreamHouse - Help & Support";
 
-            const body =
-              "Hello DreamHouse Support,\n\nI need help with:\n\n";
+              const body =
+                "Hello DreamHouse Support,\n\nI need help with:\n\n";
 
-            const url =
-              `mailto:${email}?subject=${encodeURIComponent(
-                subject
-              )}&body=${encodeURIComponent(body)}`;
+              const url =
+                `mailto:${email}?subject=${encodeURIComponent(
+                  subject
+                )}&body=${encodeURIComponent(body)}`;
 
-            const supported =
-              await Linking.canOpenURL(url);
-
-            if (supported) {
               await Linking.openURL(url);
-            } else {
+            } catch (error) {
+              console.error(
+                "Email error:",
+                error
+              );
+
               Alert.alert(
                 "Email Not Available",
-                `Please email us at ${email}`
+                "Please email us directly at:\ntaizolislam41@gmail.com"
+              );
+            }
+          },
+        },
+        {
+          text: "WhatsApp",
+          onPress: async () => {
+            try {
+              const phone =
+                "8801306575021";
+
+              const message =
+                "Hello DreamHouse Support, I need help with the DreamHouse app.";
+
+              const url =
+                `https://wa.me/${phone}?text=${encodeURIComponent(
+                  message
+                )}`;
+
+              await Linking.openURL(url);
+            } catch (error) {
+              console.error(
+                "WhatsApp error:",
+                error
+              );
+
+              Alert.alert(
+                "WhatsApp Not Available",
+                "Please make sure WhatsApp is installed on your device."
               );
             }
           },
@@ -183,7 +210,6 @@ export default function Profile() {
   // ================================
   // LOADING
   // ================================
-
   if (!isLoaded || !user) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
@@ -198,13 +224,15 @@ export default function Profile() {
   // ================================
   // PROFILE UI
   // ================================
-
   return (
     <SafeAreaView className="flex-1 bg-white">
-      {/* Avatar + Name */}
+      {/* ================================
+          AVATAR + NAME
+      ================================= */}
 
       <View className="items-center py-8">
         <View className="relative">
+          {/* Profile Image */}
           <Image
             source={{
               uri: user.imageUrl,
@@ -213,7 +241,6 @@ export default function Profile() {
           />
 
           {/* Camera Button */}
-
           <TouchableOpacity
             onPress={handleUpdateProfileImage}
             disabled={isUpdating}
@@ -221,6 +248,7 @@ export default function Profile() {
             style={{
               elevation: 3,
             }}
+            activeOpacity={0.7}
           >
             {isUpdating ? (
               <ActivityIndicator
@@ -238,23 +266,22 @@ export default function Profile() {
         </View>
 
         {/* Name */}
-
         <Text className="text-xl font-bold text-gray-800 mt-4">
           {user.firstName} {user.lastName}
         </Text>
 
         {/* Email */}
-
         <Text className="text-gray-500 mt-1">
           {user.emailAddresses[0]?.emailAddress}
         </Text>
       </View>
 
-      {/* Menu Items */}
+      {/* ================================
+          MENU ITEMS
+      ================================= */}
 
       <View className="px-6 gap-2">
         {/* Saved Properties */}
-
         <MenuItem
           icon="heart-outline"
           label="Saved Properties"
@@ -266,33 +293,24 @@ export default function Profile() {
         />
 
         {/* Notifications */}
-
         <MenuItem
           icon="notifications-outline"
           label="Notifications"
           onPress={() =>
-            Alert.alert(
-              "Notifications",
-              "Notification system is not available yet."
-            )
+            router.push("/notifications")
           }
         />
 
         {/* Settings */}
-
         <MenuItem
           icon="settings-outline"
           label="Settings"
           onPress={() =>
-            Alert.alert(
-              "Settings",
-              "Settings page is coming soon."
-            )
+            router.push("/settings")
           }
         />
 
         {/* Help & Support */}
-
         <MenuItem
           icon="help-circle-outline"
           label="Help & Support"
@@ -300,12 +318,15 @@ export default function Profile() {
         />
       </View>
 
-      {/* Sign Out */}
+      {/* ================================
+          SIGN OUT
+      ================================= */}
 
       <View className="px-6 mt-auto mb-8">
         <TouchableOpacity
           onPress={handleSignOut}
           className="flex-row items-center justify-center gap-2 bg-red-50 py-4 rounded-2xl border border-red-100"
+          activeOpacity={0.7}
         >
           <Ionicons
             name="log-out-outline"
@@ -323,7 +344,7 @@ export default function Profile() {
 }
 
 // ====================================
-// MENU ITEM
+// MENU ITEM COMPONENT
 // ====================================
 
 function MenuItem({

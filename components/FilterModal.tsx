@@ -185,7 +185,7 @@ export default function FilterModal({
                   className="flex-row items-center bg-white rounded-2xl px-3 border border-gray-200"
                   style={shadow}
                 >
-                  <Text className="text-gray-400 text-sm mr-1">₹</Text>
+                  <Text className="text-gray-400 text-sm mr-1">৳</Text>
                   <TextInput
                     className="flex-1 py-3 text-gray-800"
                     placeholder={placeholder}
